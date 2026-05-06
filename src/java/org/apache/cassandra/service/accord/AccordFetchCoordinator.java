@@ -390,7 +390,7 @@ public class AccordFetchCoordinator extends AbstractFetchCoordinator implements 
         };
 
         // TODO (desired): this could be serialized as an InetAddressAndPort and Ranges if we had a special case PartialTxn implementation
-        public static final IVersionedSerializer<PartialTxn> serializer = new CommandSerializers.PartialTxnSerializer(read, query, update, TableMetadatasAndKeys.serializer);
+        public static final IVersionedSerializer<PartialTxn> serializer = new CommandSerializers.PartialTxnSerializer(read, query, update, TableMetadatasAndKeys.serializer); // Chore: Our import txn is set as null
     }
 
     private final Map<TimeUUID, IncomingStream> streams = new HashMap<>();

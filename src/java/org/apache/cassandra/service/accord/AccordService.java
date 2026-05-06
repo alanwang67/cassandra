@@ -21,8 +21,10 @@ package org.apache.cassandra.service.accord;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -37,6 +39,7 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
 
 import org.slf4j.Logger;
@@ -62,6 +65,7 @@ import accord.local.durability.ShardDurability;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.primitives.Keys;
+import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
@@ -87,7 +91,10 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspace.BootstrapState;
+import org.apache.cassandra.dht.NormalizedRanges;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.journal.Params;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.AccordExecutorMetrics;
@@ -109,6 +116,7 @@ import org.apache.cassandra.service.accord.api.AccordTimeService;
 import org.apache.cassandra.service.accord.api.AccordTopologySorter;
 import org.apache.cassandra.service.accord.api.AccordViolationHandler;
 import org.apache.cassandra.service.accord.api.CompositeTopologySorter;
+import org.apache.cassandra.service.accord.api.TokenKey;
 import org.apache.cassandra.service.accord.api.TokenKey.KeyspaceSplitter;
 import org.apache.cassandra.service.accord.interop.AccordInteropAdapter.AccordInteropFactory;
 import org.apache.cassandra.service.accord.serializers.TableMetadatas;
@@ -1178,5 +1186,85 @@ public class AccordService implements IAccordService, Shutdownable
     public Params journalConfiguration()
     {
         return journal.configuration();
+    }
+
+    public void executeTransfer(String keyspace, Set<SSTableReader> sstables, TableMetadata metadata)
+    {
+        logger.info("Creating accord bulk transfer for keyspace '{}' table '{}' SSTables {}...", keyspace, metadata.name, sstables);
+
+        Topology topology = topology().current();
+
+        Map<Node.Id, CoordinatedTransfer.SSTableAssignmentsPerNode> sstableAssignmentsPerNode = getSSTableAssignmentsPerNode(sstables, topology, metadata);
+
+        Preconditions.checkArgument(!sstableAssignmentsPerNode.isEmpty());
+
+        CoordinatedTransfer transfer = new CoordinatedTransfer(keyspace, metadata, sstableAssignmentsPerNode, topology.epoch(), getSSTableTokenRange(sstables, metadata));
+
+        transfer.execute();
+    }
+
+    public static TokenRange getSSTableTokenRange(Collection<SSTableReader> sstables, TableMetadata metadata)
+    {
+        TokenKey minTokenKey = null;
+        TokenKey maxTokenKey = null;
+        for (SSTableReader sstable : sstables)
+        {
+            TokenKey startTokenKey = new TokenKey(metadata.id, sstable.getFirst().getToken());
+            TokenKey endTokenKey = new TokenKey(metadata.id, sstable.getLast().getToken());
+            if (minTokenKey == null)
+                minTokenKey = startTokenKey;
+            else if (minTokenKey.compareTo(startTokenKey) > 0)
+                minTokenKey = startTokenKey;
+
+            if (maxTokenKey == null)
+                maxTokenKey = endTokenKey;
+            else if (maxTokenKey.compareTo(endTokenKey) < 0)
+                maxTokenKey = endTokenKey;
+        }
+
+        return new TokenRange(minTokenKey, maxTokenKey);
+    }
+
+    public static Map<Node.Id, CoordinatedTransfer.SSTableAssignmentsPerNode> getSSTableAssignmentsPerNode(Collection<SSTableReader> sstables, Topology topology, TableMetadata metadata)
+    {
+        Map<Node.Id, CoordinatedTransfer.SSTableAssignmentsPerNode> sstableAssignmentsPerNode = new HashMap<>();
+
+        Map<SSTableReader, Range> sstableRanges = new HashMap<>(sstables.size());
+
+        for (SSTableReader sstable : sstables)
+        {
+            TokenKey start = new TokenKey(metadata.id(), sstable.getFirst().getToken());
+            TokenKey end = new TokenKey(metadata.id(), sstable.getLast().getToken());
+            sstableRanges.put(sstable, TokenRange.create(start, end).asRange());
+        }
+
+        for (Id id : topology.nodes())
+        {
+            Ranges rangesForNode = topology.rangesForNode(id);
+            if (rangesForNode.isEmpty())
+                continue;
+
+            Set<SSTableReader> ownedSSTableForNode = new HashSet<>();
+            List<org.apache.cassandra.dht.Range<Token>> ranges = new ArrayList<>();
+            for (Map.Entry<SSTableReader, Range> entry : sstableRanges.entrySet())
+            {
+                if (rangesForNode.intersects(entry.getValue()))
+                {
+                    ownedSSTableForNode.add(entry.getKey());
+                    ranges.add(((TokenRange) entry.getValue()).toKeyspaceRange());
+                }
+            }
+
+            if (!ownedSSTableForNode.isEmpty())
+                sstableAssignmentsPerNode.put(id, new CoordinatedTransfer.SSTableAssignmentsPerNode(id, ownedSSTableForNode, NormalizedRanges.normalizedRanges(ranges)));
+        }
+
+        return sstableAssignmentsPerNode;
+    }
+
+    public void receivedSSTableImport(PendingLocalTransfer transfer)
+    {
+        logger.info("Received SSTables in pending directory");
+        LocalTransfers.instance().received(transfer);
     }
 }

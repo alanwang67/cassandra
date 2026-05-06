@@ -437,7 +437,7 @@ public class AccordCommandStore extends CommandStore
         if (command != null)
         {
             PartialTxn txn = command.partialTxn();
-            if (txn != null)
+            if (txn != null && txn.read() instanceof TxnRead) // Chore: We will likely have to change this
             {
                 TxnRead read = (TxnRead) txn.read();
                 read.unmemoize();

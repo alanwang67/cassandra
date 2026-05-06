@@ -109,6 +109,13 @@ public class TxnNamedRead extends AbstractParameterisedVersionedSerialized<ReadC
         this.key = key;
     }
 
+    TxnNamedRead(int name, TokenRange range, ByteBuffer bytes)
+    {
+        super(bytes);
+        this.name = name;
+        this.key = range;
+    }
+
     public static TokenRange boundsAsAccordRange(AbstractBounds<PartitionPosition> range, TableId tableId)
     {
         // Should already have been unwrapped

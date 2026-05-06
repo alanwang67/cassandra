@@ -21,6 +21,7 @@ package org.apache.cassandra.service.accord;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
@@ -56,10 +57,12 @@ import accord.utils.async.AsyncResult;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.journal.Params;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.accord.AccordSyncPropagator.Notification;
 import org.apache.cassandra.service.accord.api.AccordScheduler;
 import org.apache.cassandra.service.accord.api.AccordTopologySorter;
@@ -67,6 +70,7 @@ import org.apache.cassandra.service.accord.txn.TxnResult;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.transport.Dispatcher.RequestTime;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
@@ -190,6 +194,10 @@ public interface IAccordService
     Params journalConfiguration();
 
     Node node();
+
+    void executeTransfer(String keyspace, Set<SSTableReader> sstables, TableMetadata metadata);
+
+    void receivedSSTableImport(PendingLocalTransfer transfer);
 
     /**
      * Ensure Accord's hlc is at least larger than this for anything accepted at this node
@@ -374,6 +382,18 @@ public interface IAccordService
         public Node node()
         {
             return null;
+        }
+
+        @Override
+        public void executeTransfer(String keyspace, Set<SSTableReader> sstables, TableMetadata metadata)
+        {
+
+        }
+
+        @Override
+        public void receivedSSTableImport(PendingLocalTransfer transfer)
+        {
+
         }
 
         @Override
@@ -572,6 +592,18 @@ public interface IAccordService
         public Node node()
         {
             return delegate.node();
+        }
+
+        @Override
+        public void executeTransfer(String keyspace, Set<SSTableReader> sstables, TableMetadata metadata)
+        {
+            delegate.executeTransfer(keyspace, sstables, metadata);
+        }
+
+        @Override
+        public void receivedSSTableImport(PendingLocalTransfer transfer)
+        {
+            delegate.receivedSSTableImport(transfer);
         }
 
         @Override

@@ -300,6 +300,7 @@ public class AccordInteropExecution implements ReadCoordinator
         return results;
     }
 
+    // Chore: What happens if data is on two different nodes?
     private List<AsyncChain<Data>> rangeReadChains(Txn.InMemory txn, Dispatcher.RequestTime requestTime)
     {
         TxnRead read = (TxnRead) txn.read();

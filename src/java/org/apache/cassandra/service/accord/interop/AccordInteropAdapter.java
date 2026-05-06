@@ -103,7 +103,8 @@ public class AccordInteropAdapter extends TxnAdapter
         // Unrecoverable repair always needs to be run by AccordInteropExecution
         AccordUpdate.Kind updateKind = AccordUpdate.kind(txn.update());
         ConsistencyLevel consistencyLevel = txn.read() instanceof TxnRead ? ((TxnRead) txn.read()).cassandraConsistencyLevel() : null;
-        if (updateKind != AccordUpdate.Kind.UNRECOVERABLE_REPAIR && (consistencyLevel == null || consistencyLevel == ConsistencyLevel.ONE || txn.read().keys().isEmpty()))
+        boolean isImportTxn = ((TxnRead) txn.read()).isUsedForSSTableImport();
+        if (!isImportTxn && (updateKind != AccordUpdate.Kind.UNRECOVERABLE_REPAIR && (consistencyLevel == null || consistencyLevel == ConsistencyLevel.ONE || txn.read().keys().isEmpty())))
             return false;
 
         AccordInteropExecution execution;
