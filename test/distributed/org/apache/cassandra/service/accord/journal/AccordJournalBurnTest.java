@@ -101,6 +101,11 @@ public class AccordJournalBurnTest extends BurnTestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(AccordJournalBurnTest.class);
 
+    static
+    {
+        Cluster.RandomLoader.CMD_BASE_CHECK_CHANCE = 0.1f;
+    }
+
     public static void setUp() throws Throwable
     {
         StorageService.instance.registerMBeans();
