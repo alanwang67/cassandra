@@ -20,16 +20,15 @@ package org.apache.cassandra.distributed.test.accord.journal;
 
 
 import java.util.Iterator;
-import java.util.concurrent.TimeUnit;
-
-import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.junit.Test;
 
 import accord.local.Command;
 import accord.local.Node;
+import accord.primitives.SaveStatus;
 import accord.primitives.TxnId;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.IPartitioner;
@@ -37,22 +36,18 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.accord.AccordCacheEntry;
 import org.apache.cassandra.service.accord.AccordCommandStore;
 import org.apache.cassandra.service.accord.AccordService;
 import org.apache.cassandra.service.accord.api.PartitionKey;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static com.google.common.collect.Iterables.getOnlyElement;
-import static org.apache.cassandra.Util.flush;
-import static org.apache.cassandra.Util.spinUntilTrue;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
-public class AccordJournalConsistentExpungeTest  extends TestBaseImpl
+public class AccordJournalConsistentExpungeTest extends TestBaseImpl
 {
     private static DecoratedKey dk(int key)
     {
@@ -67,14 +62,13 @@ public class AccordJournalConsistentExpungeTest  extends TestBaseImpl
     }
 
     @Test
-    public void replayCommand() throws Throwable
+    public void loadCommandErasedTest() throws Throwable
     {
         try (Cluster cluster = Cluster.build().withNodes(3)
                                       .withoutVNodes()
                                       .withConfig(config -> config
                                                             .set("accord.shard_durability_cycle", "20s")
                                                             .set("accord.ephemeral_reads", false)
-                                                            .set("accord.topology_sync_propagator_enabled_pre_start", true)
                                                             .with(NETWORK, GOSSIP))
                                       .start())
         {
@@ -85,10 +79,6 @@ public class AccordJournalConsistentExpungeTest  extends TestBaseImpl
                                            "SELECT * FROM ks.tbl WHERE k = 1; \n" +
                                            "COMMIT TRANSACTION");
 
-
-            cluster.get(1).shutdown(false).get();
-
-            cluster.get(1).startup();
             cluster.get(1).runOnInstance(() -> {
                 AccordService service = (AccordService) AccordService.instance();
                 PartitionKey key = pk(1, "ks", "tbl");
@@ -96,18 +86,10 @@ public class AccordJournalConsistentExpungeTest  extends TestBaseImpl
                 Node node = service.node();
                 AccordCommandStore commandStore = (AccordCommandStore) node.commandStores().unsafeForKey(key.toUnseekable());
 
-                StorageService.instance.move(Long.toString(key.token().getLongValue() - 100));
-
-                // I want to advance gcBefore in redundantBefore
-
-                Uninterruptibles.sleepUninterruptibly(30, TimeUnit.SECONDS);
-
-                service.journal().purge(service.node().commandStores(), node.topology()::minEpoch);
-
                 Iterator<AccordCacheEntry<TxnId, Command>> iterator = commandStore.cachesUnsafe().commands().iterator();
-                TxnId txnId = null;
 
-                // Loop through the ones that are not RX
+                TxnId txnId = TxnId.NONE;
+
                 while (iterator.hasNext())
                 {
                     txnId = iterator.next().key();
@@ -115,12 +97,16 @@ public class AccordJournalConsistentExpungeTest  extends TestBaseImpl
                         break;
                 }
 
-                commandStore.loadCommand(txnId);
+                assertFalse(txnId.isSystemTxn());
 
-                // We want this to be flushed out to SSTables
+                TxnId finalTxnId = txnId;
+                Util.spinUntilTrue(() -> commandStore.safeGetRedundantBefore().minGcBefore().compareTo(finalTxnId) >= 0, 25);
+
                 service.journal().purge(service.node().commandStores(), node.topology()::minEpoch);
 
+                assertEquals(SaveStatus.Erased, commandStore.loadCommand(txnId).saveStatus);
             });
         }
     }
 }
+
