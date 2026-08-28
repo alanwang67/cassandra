@@ -154,7 +154,7 @@ public class Bounds<T extends RingPosition<T>> extends AbstractBounds<T>
      * [   ] [   ]    [   ]   [  ]
      * [   ]         [       ]
      * This method will return the following bounds:
-     * [         ]    [          ]
+     * [         ]   [          ]
      *
      * @param bounds unsorted bounds to find overlaps
      * @return the non-overlapping bounds
