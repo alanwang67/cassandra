@@ -29,7 +29,6 @@ import static org.junit.Assert.assertTrue;
 
 public class BoundsTest
 {
-
     private Bounds<Token> bounds(long left, long right)
     {
         return new Bounds<Token>(new Murmur3Partitioner.LongToken(left), new Murmur3Partitioner.LongToken(right));
