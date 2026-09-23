@@ -32,7 +32,7 @@ import org.apache.cassandra.distributed.Cluster;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
-import static org.junit.Assert.assertEquals;
+import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
 
 /**
  * {@link AbstractType} doesn't override {@code hashCode}, so each JVM iterates hash collections of types, or of
@@ -64,9 +64,9 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             cluster.get(2).executeInternal(withKeyspace("INSERT INTO %s.tbl (k, v) VALUES (0, 1 + 1 + 2)"));
 
             // to_json shows the blob in hex
-            Object node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"))[0][0];
-            Object node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"))[0][0];
-            assertEquals("1 + 1 + 2 is different on each node", node1, node2);
+            Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
+            Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
+            assertRows(node2, node1);
         }
     }
 
@@ -84,9 +84,9 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             cluster.get(2).executeInternal(withKeyspace("INSERT INTO %s.tbl (k, v) VALUES (0, (int) ? / (2 + 2))"), 10);
 
             // to_json shows the blob in hex
-            Object node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"))[0][0];
-            Object node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"))[0][0];
-            assertEquals("(int) ? / (2 + 2) is different on each node", node1, node2);
+            Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
+            Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
+            assertRows(node2, node1);
         }
     }
 
@@ -103,9 +103,9 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             cluster.get(1).executeInternal(withKeyspace("INSERT INTO %s.tbl (k, v) VALUES (0, 100 + 100 + 2)"));
             cluster.get(2).executeInternal(withKeyspace("INSERT INTO %s.tbl (k, v) VALUES (0, 100 + 100 + 2)"));
 
-            Object node1 = cluster.get(1).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"))[0][0];
-            Object node2 = cluster.get(2).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"))[0][0];
-            assertEquals("100 + 100 + 2 is different on each node", node1, node2);
+            Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
+            Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
+            assertRows(node2, node1);
         }
     }
 
@@ -122,9 +122,9 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             cluster.get(1).executeInternal(withKeyspace("INSERT INTO %s.tbl (k, v) VALUES (0, (int) ? / (100 + 100))"), 400);
             cluster.get(2).executeInternal(withKeyspace("INSERT INTO %s.tbl (k, v) VALUES (0, (int) ? / (100 + 100))"), 400);
 
-            Object node1 = cluster.get(1).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"))[0][0];
-            Object node2 = cluster.get(2).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"))[0][0];
-            assertEquals("(int) ? / (100 + 100) is different on each node", node1, node2);
+            Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
+            Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
+            assertRows(node2, node1);
         }
     }
 
@@ -139,10 +139,11 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             cluster.get(1).executeInternal(withKeyspace("INSERT INTO %s.tbl (k) VALUES (0)"));
             cluster.get(2).executeInternal(withKeyspace("INSERT INTO %s.tbl (k) VALUES (0)"));
 
-            // The literal is either a list<bigint> or a list<timestamp>, so collection_max returns a bigint or a timestamp
-            Object node1 = cluster.get(1).executeInternal(withKeyspace("SELECT collection_max([(bigint) 1, (timestamp) 2]) FROM %s.tbl WHERE k = 0"))[0][0];
-            Object node2 = cluster.get(2).executeInternal(withKeyspace("SELECT collection_max([(bigint) 1, (timestamp) 2]) FROM %s.tbl WHERE k = 0"))[0][0];
-            assertEquals("[(bigint) 1, (timestamp) 2] has a different type on each node", node1.getClass(), node2.getClass());
+            // The literal is either a list<bigint> or a list<timestamp>, so collection_max returns a bigint or a timestamp,
+            // which to_json shows as 2 or as a quoted date
+            Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(collection_max([(bigint) 1, (timestamp) 2])) FROM %s.tbl WHERE k = 0"));
+            Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(collection_max([(bigint) 1, (timestamp) 2])) FROM %s.tbl WHERE k = 0"));
+            assertRows(node2, node1);
         }
     }
 
