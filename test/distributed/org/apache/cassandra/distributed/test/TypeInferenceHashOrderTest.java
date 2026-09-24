@@ -18,6 +18,7 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import com.google.common.hash.Hashing;
 
@@ -66,6 +67,8 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             // to_json shows the blob in hex
             Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
             Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
+            //   node 1: [["0x40800000"]]  the float 4.0
+            //   node 2: [["0x00000004"]]  the int 4
             assertRows(node2, node1);
         }
     }
@@ -86,6 +89,8 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             // to_json shows the blob in hex
             Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
             Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(v) FROM %s.tbl WHERE k = 0"));
+            //   node 1: [["0x00000002"]]  the int 2
+            //   node 2: [["0x40200000"]]  the float 2.5
             assertRows(node2, node1);
         }
     }
@@ -105,6 +110,8 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
 
             Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
             Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
+            //   node 1: [[-54]]  100 + 100 overflowed a tinyint
+            //   node 2: [[202]]
             assertRows(node2, node1);
         }
     }
@@ -124,6 +131,8 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
 
             Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
             Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT v FROM %s.tbl WHERE k = 0"));
+            //   node 1: [[-7]]  100 + 100 overflowed a tinyint, and 400 / -56 is -7
+            //   node 2: [[2]]
             assertRows(node2, node1);
         }
     }
@@ -143,6 +152,8 @@ public class TypeInferenceHashOrderTest extends TestBaseImpl
             // which to_json shows as 2 or as a quoted date
             Object[][] node1 = cluster.get(1).executeInternal(withKeyspace("SELECT to_json(collection_max([(bigint) 1, (timestamp) 2])) FROM %s.tbl WHERE k = 0"));
             Object[][] node2 = cluster.get(2).executeInternal(withKeyspace("SELECT to_json(collection_max([(bigint) 1, (timestamp) 2])) FROM %s.tbl WHERE k = 0"));
+            //   node 1: [[2]]                           a bigint
+            //   node 2: [["1970-01-01 00:00:00.002Z"]]  a timestamp
             assertRows(node2, node1);
         }
     }
