@@ -1,0 +1,5 @@
+name = "cassandra-types"
+defaultTargets = ["CassandraTypes"]
+
+[[lean_lib]]
+name = "CassandraTypes"
