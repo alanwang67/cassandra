@@ -264,11 +264,12 @@ public class MetadataSerializer implements IMetadataSerializer
     public void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents) throws IOException
     {
         String filePath = descriptor.tmpFilenameFor(Component.STATS);
-        try (FileOutputStreamPlus out = file.newOutputStream(File.WriteMode.OVERWRITE))
+        try (FileOutputStream fos = new FileOutputStream(filePath);
+             DataOutputStreamPlus out = new BufferedDataOutputStreamPlus(fos))
         {
             serialize(currentComponents, out, descriptor.version);
             out.flush();
-            out.sync();
+            SyncUtil.sync(fos);
         }
         catch (IOException e)
         {
