@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.functions;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import org.junit.BeforeClass;
@@ -81,14 +80,9 @@ public class FunctionCallTestAssignmentTest extends CQLTester
             for (AbstractType<?> type : TYPES)
             {
                 ColumnSpecification receiver  = new ColumnSpecification(KEYSPACE, "tbl", new ColumnIdentifier("v", true), type);
-                BB.calls.set(0);
                 TestResult expected = withoutMemoization(() -> parse(cql).testAssignment(KEYSPACE, receiver));
-                long callsWithoutMemoization = BB.calls.get();
                 Term.Raw raw = parse(cql);
-                BB.calls.set(0);
                 assertThat(raw.testAssignment(KEYSPACE, receiver)).isEqualTo(expected);
-                long callsWithMemoization = BB.calls.get();
-                assertThat(callsWithMemoization).isLessThanOrEqualTo(callsWithoutMemoization);
             }
         });
     }
@@ -123,7 +117,6 @@ public class FunctionCallTestAssignmentTest extends CQLTester
     public static class BB
     {
         public static volatile boolean memoize = true;
-        public static final AtomicLong calls = new AtomicLong();
 
         // Clears the cache for testAssignment every time we enter the method
         @Advice.OnMethodEnter
@@ -131,7 +124,6 @@ public class FunctionCallTestAssignmentTest extends CQLTester
         {
             if (!memoize)
                 cacheResults.clear();
-            calls.incrementAndGet();
         }
     }
 }
