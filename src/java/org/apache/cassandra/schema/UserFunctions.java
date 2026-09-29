@@ -266,7 +266,12 @@ public final class UserFunctions implements Iterable<UserFunction>
 
     public static UserFunctions getCurrentUserFunctions(FunctionName name, String keyspace)
     {
-        KeyspaceMetadata ksm = ClusterMetadata.current().schema.getKeyspaces().getNullable(name.hasKeyspace() ? name.keyspace : keyspace);
+        return getCurrentUserFunctions(ClusterMetadata.current(), name, keyspace);
+    }
+
+    public static UserFunctions getCurrentUserFunctions(ClusterMetadata current, FunctionName name, String keyspace)
+    {
+        KeyspaceMetadata ksm = current.schema.getKeyspaces().getNullable(name.hasKeyspace() ? name.keyspace : keyspace);
         UserFunctions userFunctions = UserFunctions.none();
         if (ksm != null)
             userFunctions = ksm.userFunctions;

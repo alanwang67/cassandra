@@ -22,7 +22,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+
+import com.google.common.base.Objects;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -40,6 +44,7 @@ import org.apache.cassandra.db.marshal.MultiElementType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.UserFunctions;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
@@ -130,6 +135,54 @@ public class FunctionCall extends Term.NonTerminal
     {
         private final FunctionName name;
         private final List<Term.Raw> terms;
+        // testAssignment can be called from more than 1 thread for materialized views,
+        // so this needs to be thread safe
+        private final Map<Key, TestResult> cacheResults = new ConcurrentHashMap<>();
+
+        // The following terms below are enough to uniquely identify the parameters to testAssignment
+        private static final class Key
+        {
+            public final String keyspace;
+            public final String receiverKeyspace;
+            public final String receiverTable;
+            public final AbstractType<?> receiverType;
+            // User functions are unique to an epoch, so we use it as a proxy
+            // rather than storing UserFunctions
+            public final long epoch;
+
+            public Key(String keyspace,
+                       String receiverKeyspace,
+                       String receiverTable,
+                       AbstractType<?> receiverType,
+                       long epoch)
+            {
+                this.keyspace = keyspace;
+                this.receiverKeyspace = receiverKeyspace;
+                this.receiverTable = receiverTable;
+                this.receiverType = receiverType;
+                this.epoch = epoch;
+            }
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (!(o instanceof Key))
+                    return false;
+
+                Key that = (Key) o;
+                return Objects.equal(this.keyspace, that.keyspace)
+                       && Objects.equal(this.receiverKeyspace, that.receiverKeyspace)
+                       && Objects.equal(this.receiverTable, that.receiverTable)
+                       && Objects.equal(this.receiverType, that.receiverType)
+                       && this.epoch == that.epoch;
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hashCode(keyspace, receiverKeyspace, receiverTable, receiverType, epoch);
+            }
+        }
 
         public Raw(FunctionName name, List<Term.Raw> terms)
         {
@@ -193,7 +246,23 @@ public class FunctionCall extends Term.NonTerminal
             return new FunctionCall(scalarFun, parameters);
         }
 
+        @Override
         public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        {
+            ClusterMetadata clusterMetadata = ClusterMetadata.current();
+            UserFunctions userFunctions = UserFunctions.getCurrentUserFunctions(clusterMetadata, name, keyspace);
+            Key key = new Key(keyspace, receiver.ksName, receiver.cfName, receiver.type, clusterMetadata.epoch.getEpoch());
+            TestResult result = cacheResults.get(key);
+            if (result == null)
+            {
+                result = computeTestAssignment(keyspace, receiver, userFunctions);
+                cacheResults.put(key, result);
+            }
+
+            return result;
+        }
+
+        private AssignmentTestable.TestResult computeTestAssignment(String keyspace, ColumnSpecification receiver, UserFunctions userFunctions)
         {
             // Note: Functions.get() will return null if the function doesn't exist, or throw is no function matching
             // the arguments can be found. We may get one of those if an undefined/wrong function is used as argument
@@ -201,25 +270,23 @@ public class FunctionCall extends Term.NonTerminal
             // later with a more helpful error message that if we were to return false here.
             try
             {
-                Function fun = FunctionResolver.get(keyspace, name, terms, receiver.ksName, receiver.cfName, receiver.type, UserFunctions.getCurrentUserFunctions(name, keyspace));
-
+                Function fun = FunctionResolver.get(keyspace, name, terms, receiver.ksName, receiver.cfName, receiver.type, userFunctions);
                 // Because the return type of functions built by factories is not fixed but depending on the types of
                 // their arguments, we'll always get EXACT_MATCH.  To handle potentially ambiguous function calls with
                 // dynamically built functions as an argument, always return WEAKLY_ASSIGNABLE to force the user to
                 // typecast if necessary
                 if (fun != null && NativeFunctions.instance.hasFactory(fun.name()))
                     return TestResult.WEAKLY_ASSIGNABLE;
-
                 if (fun != null && receiver.type.udfType().equals(fun.returnType()))
-                    return AssignmentTestable.TestResult.EXACT_MATCH;
+                    return TestResult.EXACT_MATCH;
                 else if (fun == null || receiver.type.udfType().isValueCompatibleWith(fun.returnType()))
-                    return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                    return TestResult.WEAKLY_ASSIGNABLE;
                 else
-                    return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+                    return TestResult.NOT_ASSIGNABLE;
             }
             catch (InvalidRequestException e)
             {
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                return TestResult.WEAKLY_ASSIGNABLE;
             }
         }
 
